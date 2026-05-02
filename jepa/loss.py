@@ -18,20 +18,26 @@ def infonce_loss(
     z: Tensor,
     tau: float = 0.1,
     subsample_cap: int = 8192,
+    pred_lag: int = 1,
 ) -> tuple[Tensor, dict]:
     """
     InfoNCE on next-position latents.
 
     p: (B, T, D) predictor outputs
-    z: (B, T, D) encoder latents
+    z: (B, T, D) encoder latents (or target latents from EMA encoder)
+    pred_lag: predict z_{t+pred_lag} from p_t (default 1 = next position).
+              Larger values weaken the position-shortcut by forcing the
+              predictor to extrapolate further.
 
-    For each position t in [0, T-1), match predictor(p_t) to stop_grad(z_{t+1}).
-    Positives = matched pairs (diagonal). Negatives = all other (rank, batch, position)
-    triples in the all-gathered target pool.
+    For each position t in [0, T-pred_lag), match predictor(p_t) to
+    stop_grad(z_{t+pred_lag}). Positives = matched pairs (diagonal).
+    Negatives = all other (rank, batch, position) triples in the
+    all-gathered target pool.
     """
     B, T, D = p.shape
-    p_at_t = p[:, :-1].reshape(-1, D)
-    z_tgt_local = z[:, 1:].detach().reshape(-1, D)
+    assert pred_lag >= 1 and pred_lag < T, f"invalid pred_lag={pred_lag} for T={T}"
+    p_at_t = p[:, :-pred_lag].reshape(-1, D)
+    z_tgt_local = z[:, pred_lag:].detach().reshape(-1, D)
 
     p_at_t = F.normalize(p_at_t, dim=-1)
     z_tgt_local = F.normalize(z_tgt_local, dim=-1)

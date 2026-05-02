@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from jepa.configs import load_config
 from jepa.data import FineWebBatcher, synthetic_batch
+from jepa.ema import EMATarget
 from jepa.eval import evaluate_val
 from jepa.loss import infonce_loss
 from jepa.model import JEPA
@@ -112,6 +113,15 @@ def main(
         model = DDP(model, device_ids=[local_rank])
     model_unwrapped = model.module if is_distributed else model
 
+    use_ema = cfg.train.use_ema
+    pred_lag = cfg.train.pred_lag
+    ema = None
+    if use_ema:
+        log(f"EMA target encoder enabled (momentum={cfg.train.ema_momentum})")
+        ema = EMATarget(model_unwrapped, momentum=cfg.train.ema_momentum)
+    if pred_lag != 1:
+        log(f"prediction lag = {pred_lag} (predicting z_{{t+{pred_lag}}} instead of z_{{t+1}})")
+
     if use_compile:
         log("torch.compile(model)...")
         model = torch.compile(model, dynamic=False)
@@ -148,12 +158,19 @@ def main(
         x = next(train_loader)
         with autocast_ctx:
             p, z = model(x)
-            loss, metrics = infonce_loss(p, z, tau=cfg.train.tau, subsample_cap=cfg.train.neg_subsample_cap)
+            target_z = ema.target_z(x) if ema is not None else z
+            loss, metrics = infonce_loss(
+                p, target_z, tau=cfg.train.tau,
+                subsample_cap=cfg.train.neg_subsample_cap,
+                pred_lag=pred_lag,
+            )
 
         opt.zero_grad()
         loss.backward()
         grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), cfg.train.grad_clip)
         opt.step()
+        if ema is not None:
+            ema.update()
 
         if step % cfg.train.log_every == 0:
             sps = (step + 1) / (time.time() - t0)

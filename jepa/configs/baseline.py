@@ -36,6 +36,11 @@ class TrainConfig:
     seed: int = 42
     compile: bool = True
 
+    use_ema: bool = False
+    ema_momentum: float = 0.999
+
+    pred_lag: int = 1
+
     train_data_glob: str = "data/fineweb10B/fineweb_train_*.bin"
     val_data_glob: str = "data/fineweb10B/fineweb_val_*.bin"
 
