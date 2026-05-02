@@ -37,7 +37,7 @@ class CausalSelfAttention(nn.Module):
         self.out = nn.Linear(model_dim, model_dim, bias=False)
         nn.init.zeros_(self.out.weight)
 
-    def forward(self, x: Tensor, cos: Tensor, sin: Tensor) -> Tensor:
+    def forward(self, x: Tensor, cos: Tensor | None, sin: Tensor | None) -> Tensor:
         B, T, _ = x.shape
         q, k, v = self.qkv(x).chunk(3, dim=-1)
         q = q.view(B, T, self.n_heads, self.head_dim)
@@ -45,8 +45,9 @@ class CausalSelfAttention(nn.Module):
         v = v.view(B, T, self.n_heads, self.head_dim)
         q = rms_norm(q)
         k = rms_norm(k)
-        q = apply_rope(q, cos, sin)
-        k = apply_rope(k, cos, sin)
+        if cos is not None:
+            q = apply_rope(q, cos, sin)
+            k = apply_rope(k, cos, sin)
         q = q.transpose(1, 2)
         k = k.transpose(1, 2)
         v = v.transpose(1, 2)
@@ -82,9 +83,13 @@ class JEPA(nn.Module):
         self.split = cfg.split_index
         self.proj = nn.Linear(cfg.model_dim, cfg.proj_dim, bias=False)
         nn.init.normal_(self.proj.weight, mean=0.0, std=0.02)
-        cos, sin = precompute_rope(cfg.head_dim, cfg.seq_len, cfg.rope_base)
-        self.register_buffer("rope_cos", cos, persistent=False)
-        self.register_buffer("rope_sin", sin, persistent=False)
+        if getattr(cfg, "use_rope", True):
+            cos, sin = precompute_rope(cfg.head_dim, cfg.seq_len, cfg.rope_base)
+            self.register_buffer("rope_cos", cos, persistent=False)
+            self.register_buffer("rope_sin", sin, persistent=False)
+        else:
+            self.rope_cos = None
+            self.rope_sin = None
 
     def forward(self, input_seq: Tensor) -> tuple[Tensor, Tensor]:
         """input_seq: (B, T) int64. Returns (p, z), each (B, T, proj_dim).
@@ -108,6 +113,6 @@ class JEPA(nn.Module):
         """Encoder-only forward, returns raw (B, T, model_dim) hidden state for downstream probes."""
         x = rms_norm(self.embed(input_seq))
         cos, sin = self.rope_cos, self.rope_sin
-        for blk in self.blocks[:self.split]:
+        for blk in self.blocks[: self.split]:
             x = blk(x, cos, sin)
         return rms_norm(x)

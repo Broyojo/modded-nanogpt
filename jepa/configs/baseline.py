@@ -12,6 +12,7 @@ class JEPAConfig:
     proj_dim: int = 128
     seq_len: int = 1024
     rope_base: float = 10000.0
+    use_rope: bool = True
 
 
 @dataclass(frozen=True, slots=True)
