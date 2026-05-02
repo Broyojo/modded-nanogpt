@@ -17,6 +17,7 @@ import torch.nn.functional as F
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from jepa.eval_probe import load_jepa
+from jepa.model import apply_rope, rms_norm
 
 BOS_ID = 50256
 DEFAULT_TEXT = (
@@ -24,6 +25,86 @@ DEFAULT_TEXT = (
     "Cats and dogs are common household pets. "
     "Many people prefer cats because they are independent."
 )
+
+
+@torch.no_grad()
+def extract_encoder_attention_maps(model, x: torch.Tensor) -> list[torch.Tensor]:
+    """Manually run encoder layers, replicating the model's attention but
+    capturing the post-softmax attention weights at each encoder layer.
+    Returns a list of (n_heads, T, T) tensors, one per encoder block.
+    """
+    cfg = model.cfg
+    cos, sin = model.rope_cos, model.rope_sin
+    h = rms_norm(model.embed(x))
+    attn_maps = []
+    for i in range(model.split):
+        block = model.blocks[i]
+        attn = block.attn
+        x_norm = rms_norm(h)
+        B, T, _ = x_norm.shape
+        q, k, v = attn.qkv(x_norm).chunk(3, dim=-1)
+        q = q.view(B, T, attn.n_heads, attn.head_dim)
+        k = k.view(B, T, attn.n_heads, attn.head_dim)
+        v = v.view(B, T, attn.n_heads, attn.head_dim)
+        q = rms_norm(q)
+        k = rms_norm(k)
+        q = apply_rope(q, cos, sin)
+        k = apply_rope(k, cos, sin)
+        q = q.transpose(1, 2)
+        k = k.transpose(1, 2)
+        v = v.transpose(1, 2)
+        scale = attn.head_dim ** -0.5
+        scores = (q.float() @ k.float().transpose(-1, -2)) * scale
+        causal_mask = torch.triu(torch.ones(T, T, dtype=torch.bool, device=x.device), diagonal=1)
+        scores = scores.masked_fill(causal_mask, float("-inf"))
+        attn_w = F.softmax(scores, dim=-1)
+        attn_maps.append(attn_w[0].detach().cpu())
+        y = (attn_w.to(v.dtype) @ v).transpose(1, 2).contiguous().view(B, T, attn.n_heads * attn.head_dim)
+        y = attn.out(y)
+        x_after_attn = h + y
+        x_norm2 = rms_norm(x_after_attn)
+        mlp_out = block.mlp_w2(F.relu(block.mlp_w1(x_norm2)).square())
+        h = x_after_attn + mlp_out
+    return attn_maps
+
+
+def plot_attention_maps(attn_maps: list[torch.Tensor], token_strs: list[str], output_dir: Path):
+    n_layers = len(attn_maps)
+    n_heads = attn_maps[0].shape[0]
+    T = attn_maps[0].shape[1]
+
+    fig, axes = plt.subplots(1, n_layers, figsize=(4 * n_layers, 4.5), squeeze=False)
+    for li, attn in enumerate(attn_maps):
+        ax = axes[0, li]
+        avg = attn.mean(dim=0).numpy()
+        im = ax.imshow(avg, cmap="viridis", vmin=0, vmax=avg.max(), aspect="equal")
+        ax.set_title(f"layer {li} — mean over {n_heads} heads")
+        ax.set_xlabel("attended-to position j")
+        if li == 0:
+            ax.set_ylabel("query position i")
+        if T <= 40:
+            ax.set_xticks(range(T))
+            ax.set_yticks(range(T))
+            ax.set_xticklabels(token_strs, rotation=90, fontsize=6)
+            ax.set_yticklabels(token_strs, fontsize=6)
+        plt.colorbar(im, ax=ax, fraction=0.046)
+    plt.tight_layout()
+    plt.savefig(output_dir / "attn_per_layer.png", dpi=120, bbox_inches="tight")
+    plt.close()
+
+    fig, axes = plt.subplots(n_layers, n_heads, figsize=(2.4 * n_heads, 2.4 * n_layers), squeeze=False)
+    for li, attn in enumerate(attn_maps):
+        for hi in range(n_heads):
+            ax = axes[li, hi]
+            mat = attn[hi].numpy()
+            ax.imshow(mat, cmap="viridis", vmin=0, vmax=mat.max(), aspect="equal")
+            ax.set_title(f"L{li} H{hi}", fontsize=9)
+            ax.set_xticks([])
+            ax.set_yticks([])
+    plt.suptitle(f"Encoder attention per (layer, head) — query rows attend to columns; T={T}", fontsize=12)
+    plt.tight_layout()
+    plt.savefig(output_dir / "attn_per_head.png", dpi=120, bbox_inches="tight")
+    plt.close()
 
 
 def visualize(ckpt_path: str, text: str, output_dir: str, max_tokens: int = 64):
@@ -133,11 +214,16 @@ def visualize(ckpt_path: str, text: str, output_dir: str, max_tokens: int = 64):
     plt.savefig(output_dir / "retrieval_and_norms.png", dpi=120, bbox_inches="tight")
     plt.close()
 
+    attn_maps = extract_encoder_attention_maps(model, x)
+    plot_attention_maps(attn_maps, token_strs, output_dir)
+
     print(f"\nWithin-sentence retrieval: {correct:.3f} top-1 ({(pred == truth).sum()}/{len(truth)})")
     print(f"saved figures to {output_dir.resolve()}/")
     print(f"  - self_sim.png        : encoder hidden + projected latent self-similarity")
     print(f"  - pred_vs_enc.png     : predictor vs encoder cross-similarity (the JEPA target diagonal)")
     print(f"  - retrieval_and_norms.png : within-sentence retrieval histogram + per-position norms")
+    print(f"  - attn_per_layer.png  : encoder attention, mean over heads, per layer")
+    print(f"  - attn_per_head.png   : encoder attention, every (layer, head)")
 
 
 if __name__ == "__main__":
