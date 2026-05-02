@@ -12,7 +12,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from jepa.configs.baseline import CONFIG
+from jepa.configs import load_config
 from jepa.data import FineWebBatcher, synthetic_batch
 from jepa.eval import evaluate_val
 from jepa.loss import infonce_loss
@@ -48,6 +48,7 @@ def make_synthetic_loader(seqs_per_step: int, seq_len: int, vocab_size: int, dev
 
 
 def main(
+    config_name: str = "baseline",
     synthetic: bool = False,
     total_steps_override: int | None = None,
     warmup_steps_override: int | None = None,
@@ -58,7 +59,7 @@ def main(
 ):
     rank, world_size, local_rank, device, is_distributed = setup_distributed()
     master = rank == 0
-    cfg = CONFIG
+    cfg = load_config(config_name)
     torch.manual_seed(cfg.train.seed + rank)
     torch.set_float32_matmul_precision("high")
 
@@ -99,7 +100,7 @@ def main(
         )
 
     log(f"world_size={world_size} rank={rank} device={device}")
-    log(f"use_bf16={use_bf16} use_compile={use_compile} use_wandb={use_wandb}")
+    log(f"config_name={config_name} use_bf16={use_bf16} use_compile={use_compile} use_wandb={use_wandb}")
     log(f"total_steps={total_steps} warmup_steps={warmup_steps}")
     log(f"config: {cfg}")
 
@@ -218,10 +219,13 @@ if __name__ == "__main__":
     steps_arg = next((a for a in sys.argv if a.startswith("--steps=")), None)
     warmup_arg = next((a for a in sys.argv if a.startswith("--warmup=")), None)
     name_arg = next((a for a in sys.argv if a.startswith("--name=")), None)
+    config_arg = next((a for a in sys.argv if a.startswith("--config=")), None)
     steps = int(steps_arg.split("=")[1]) if steps_arg else None
     warmup = int(warmup_arg.split("=")[1]) if warmup_arg else None
     name = name_arg.split("=")[1] if name_arg else None
+    config_name = config_arg.split("=")[1] if config_arg else "baseline"
     main(
+        config_name=config_name,
         synthetic=synthetic,
         total_steps_override=steps,
         warmup_steps_override=warmup,
