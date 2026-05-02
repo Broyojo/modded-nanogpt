@@ -210,7 +210,7 @@ def main(
     if master:
         ckpt_dir = Path(__file__).resolve().parent / "checkpoints"
         ckpt_dir.mkdir(exist_ok=True)
-        ckpt_path = ckpt_dir / f"final_step{total_steps}.pt"
+        ckpt_path = ckpt_dir / f"{config_name}_step{total_steps}.pt"
         torch.save(
             {
                 "model": model_unwrapped.state_dict(),
