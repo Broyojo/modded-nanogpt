@@ -68,6 +68,80 @@ def extract_encoder_attention_maps(model, x: torch.Tensor) -> list[torch.Tensor]
     return attn_maps
 
 
+def analyze_semantic_attention(
+    attn_maps: list[torch.Tensor],
+    token_strs: list[str],
+    output_dir: Path,
+    query_tokens: list[str] | None = None,
+    top_k: int = 4,
+):
+    """Strip BOS attention sink and inspect per-token attention targets.
+
+    Two artifacts:
+      - attn_no_bos.png   : per-layer attention with column 0 (BOS) zeroed +
+                            row-renormalized, mean-over-heads. Shows the
+                            "post-sink" residual pattern.
+      - semantic_attn.txt : for each query token in `query_tokens`, prints
+                            its top-k attended tokens at every (layer, head),
+                            excluding the BOS column.
+    """
+    n_layers = len(attn_maps)
+    n_heads = attn_maps[0].shape[0]
+    T = attn_maps[0].shape[1]
+
+    fig, axes = plt.subplots(1, n_layers, figsize=(4 * n_layers, 4.5), squeeze=False)
+    for li, attn in enumerate(attn_maps):
+        ax = axes[0, li]
+        a = attn.clone()
+        a[:, :, 0] = 0
+        s = a.sum(dim=-1, keepdim=True).clamp_min(1e-9)
+        a = a / s
+        avg = a.mean(dim=0).numpy()
+        im = ax.imshow(avg, cmap="viridis", vmin=0, vmax=avg.max() if avg.max() > 0 else 1.0, aspect="equal")
+        ax.set_title(f"layer {li} — BOS column zeroed, renormalized, mean over heads")
+        ax.set_xlabel("attended-to position j")
+        if li == 0:
+            ax.set_ylabel("query position i")
+        if T <= 40:
+            ax.set_xticks(range(T))
+            ax.set_yticks(range(T))
+            ax.set_xticklabels(token_strs, rotation=90, fontsize=6)
+            ax.set_yticklabels(token_strs, fontsize=6)
+        plt.colorbar(im, ax=ax, fraction=0.046)
+    plt.tight_layout()
+    plt.savefig(output_dir / "attn_no_bos.png", dpi=120, bbox_inches="tight")
+    plt.close()
+
+    if query_tokens is None:
+        query_tokens = []
+        for s in ["cat", "dog", "mat", "rug", "Cats", "dogs", "pets", "cats", "they", "people"]:
+            for i, t in enumerate(token_strs):
+                if t.strip() == s and i not in [j for j, q in query_tokens]:
+                    query_tokens.append((i, t))
+                    break
+    else:
+        query_tokens = [(i, t) for s in query_tokens for i, t in enumerate(token_strs) if t.strip() == s][:10]
+
+    out_lines = []
+    out_lines.append(f"Semantic attention summary (T={T} tokens; BOS column excluded)")
+    out_lines.append(f"Tokens: {' '.join(f'{i}:{repr(t)}' for i, t in enumerate(token_strs))}")
+    out_lines.append("")
+    for q_idx, q_tok in query_tokens:
+        out_lines.append(f"=== query position {q_idx} ('{q_tok}') ===")
+        for li, attn in enumerate(attn_maps):
+            row = attn[:, q_idx].clone()
+            row[:, 0] = 0
+            s = row.sum(dim=-1, keepdim=True).clamp_min(1e-9)
+            row = row / s
+            mean_row = row.mean(dim=0)
+            top_vals, top_idx = mean_row.topk(min(top_k, T))
+            entries = [f"{token_strs[j]!r}@{j}={top_vals[k].item():.3f}" for k, j in enumerate(top_idx.tolist()) if top_vals[k].item() > 0.01]
+            out_lines.append(f"  layer {li} (head-mean): " + ", ".join(entries) if entries else f"  layer {li}: (all attention <1% on non-BOS)")
+        out_lines.append("")
+    out_path = output_dir / "semantic_attn.txt"
+    out_path.write_text("\n".join(out_lines))
+
+
 def plot_attention_maps(attn_maps: list[torch.Tensor], token_strs: list[str], output_dir: Path):
     n_layers = len(attn_maps)
     n_heads = attn_maps[0].shape[0]
@@ -216,6 +290,7 @@ def visualize(ckpt_path: str, text: str, output_dir: str, max_tokens: int = 64):
 
     attn_maps = extract_encoder_attention_maps(model, x)
     plot_attention_maps(attn_maps, token_strs, output_dir)
+    analyze_semantic_attention(attn_maps, token_strs, output_dir)
 
     print(f"\nWithin-sentence retrieval: {correct:.3f} top-1 ({(pred == truth).sum()}/{len(truth)})")
     print(f"saved figures to {output_dir.resolve()}/")

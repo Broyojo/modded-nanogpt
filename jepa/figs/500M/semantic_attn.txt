@@ -1,0 +1,62 @@
+Semantic attention summary (T=32 tokens; BOS column excluded)
+Tokens: 0:'<|endof…' 1:'The' 2:' cat' 3:' sat' 4:' on' 5:' the' 6:' mat' 7:'.' 8:' The' 9:' dog' 10:' sat' 11:' on' 12:' the' 13:' rug' 14:'.' 15:' Cats' 16:' and' 17:' dogs' 18:' are' 19:' common' 20:' househ…' 21:' pets' 22:'.' 23:' Many' 24:' people' 25:' prefer' 26:' cats' 27:' because' 28:' they' 29:' are' 30:' indepe…' 31:'.'
+
+=== query position 2 (' cat') ===
+  layer 0 (head-mean): ' cat'@2=0.733, 'The'@1=0.267
+  layer 1 (head-mean): ' cat'@2=0.902, 'The'@1=0.098
+  layer 2 (head-mean): 'The'@1=0.840, ' cat'@2=0.160
+  layer 3 (head-mean): ' cat'@2=0.998
+
+=== query position 9 (' dog') ===
+  layer 0 (head-mean): ' on'@4=0.330, ' The'@8=0.142, ' sat'@3=0.107, ' the'@5=0.104
+  layer 1 (head-mean): ' dog'@9=0.191, '.'@7=0.142, ' The'@8=0.139, ' mat'@6=0.114
+  layer 2 (head-mean): 'The'@1=0.816, ' cat'@2=0.161
+  layer 3 (head-mean): ' cat'@2=0.418, ' sat'@3=0.124, ' mat'@6=0.085, '.'@7=0.085
+
+=== query position 6 (' mat') ===
+  layer 0 (head-mean): ' on'@4=0.467, ' cat'@2=0.185, ' sat'@3=0.170, ' the'@5=0.122
+  layer 1 (head-mean): ' mat'@6=0.278, ' the'@5=0.196, ' on'@4=0.196, ' sat'@3=0.131
+  layer 2 (head-mean): 'The'@1=0.838, ' cat'@2=0.151
+  layer 3 (head-mean): ' cat'@2=0.538, ' sat'@3=0.181, ' on'@4=0.106, ' the'@5=0.088
+
+=== query position 13 (' rug') ===
+  layer 0 (head-mean): ' on'@4=0.205, ' on'@11=0.163, ' The'@8=0.135, '.'@7=0.072
+  layer 1 (head-mean): ' rug'@13=0.142, ' on'@11=0.118, ' the'@12=0.107, ' sat'@10=0.091
+  layer 2 (head-mean): 'The'@1=0.793, ' cat'@2=0.163
+  layer 3 (head-mean): ' cat'@2=0.300, ' sat'@3=0.107, ' The'@8=0.074, ' dog'@9=0.072
+
+=== query position 15 (' Cats') ===
+  layer 0 (head-mean): ' on'@4=0.186, ' on'@11=0.181, ' The'@8=0.108, ' sat'@10=0.068
+  layer 1 (head-mean): ' Cats'@15=0.123, ' rug'@13=0.110, '.'@14=0.097, ' cat'@2=0.085
+  layer 2 (head-mean): 'The'@1=0.790, ' cat'@2=0.156
+  layer 3 (head-mean): ' cat'@2=0.221, ' sat'@3=0.097, ' on'@4=0.067, ' on'@11=0.061
+
+=== query position 17 (' dogs') ===
+  layer 0 (head-mean): ' on'@11=0.176, ' on'@4=0.168, ' The'@8=0.086, ' rug'@13=0.070
+  layer 1 (head-mean): ' dogs'@17=0.110, ' Cats'@15=0.100, ' and'@16=0.087, ' cat'@2=0.080
+  layer 2 (head-mean): 'The'@1=0.791, ' cat'@2=0.151
+  layer 3 (head-mean): ' cat'@2=0.143, ' rug'@13=0.069, ' sat'@3=0.068, ' mat'@6=0.067
+
+=== query position 21 (' pets') ===
+  layer 0 (head-mean): ' on'@11=0.147, ' on'@4=0.135, ' The'@8=0.069, ' are'@18=0.067
+  layer 1 (head-mean): ' pets'@21=0.095, ' common'@19=0.091, ' househ…'@20=0.078, ' are'@18=0.071
+  layer 2 (head-mean): 'The'@1=0.806, ' cat'@2=0.144
+  layer 3 (head-mean): ' cat'@2=0.091, '.'@14=0.089, ' Cats'@15=0.079, ' rug'@13=0.078
+
+=== query position 26 (' cats') ===
+  layer 0 (head-mean): ' on'@4=0.137, ' on'@11=0.112, ' people'@24=0.059, ' common'@19=0.056
+  layer 1 (head-mean): ' cats'@26=0.082, ' people'@24=0.082, ' prefer'@25=0.070, ' Many'@23=0.066
+  layer 2 (head-mean): 'The'@1=0.817, ' cat'@2=0.144
+  layer 3 (head-mean): ' cat'@2=0.142, ' Cats'@15=0.085, '.'@14=0.079, ' and'@16=0.067
+
+=== query position 28 (' they') ===
+  layer 0 (head-mean): ' on'@4=0.128, ' on'@11=0.106, ' people'@24=0.079, ' common'@19=0.058
+  layer 1 (head-mean): ' they'@28=0.078, ' cats'@26=0.076, ' because'@27=0.066, ' prefer'@25=0.060
+  layer 2 (head-mean): 'The'@1=0.817, ' cat'@2=0.144
+  layer 3 (head-mean): ' cat'@2=0.164, ' Cats'@15=0.069, ' and'@16=0.063, '.'@14=0.060
+
+=== query position 24 (' people') ===
+  layer 0 (head-mean): ' on'@4=0.130, ' on'@11=0.127, ' pets'@21=0.054, ' are'@18=0.053
+  layer 1 (head-mean): ' people'@24=0.088, '.'@22=0.085, ' Many'@23=0.074, ' pets'@21=0.067
+  layer 2 (head-mean): 'The'@1=0.815, ' cat'@2=0.143
+  layer 3 (head-mean): ' cat'@2=0.115, ' Cats'@15=0.088, '.'@14=0.087, ' rug'@13=0.076
