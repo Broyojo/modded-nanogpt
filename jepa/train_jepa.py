@@ -2,6 +2,7 @@ import math
 import os
 import sys
 import time
+from contextlib import nullcontext
 from pathlib import Path
 
 import torch
@@ -45,11 +46,17 @@ def make_synthetic_loader(seqs_per_step: int, seq_len: int, vocab_size: int, dev
         seed += 1
 
 
-def main(synthetic: bool = False, total_steps_override: int | None = None):
+def main(
+    synthetic: bool = False,
+    total_steps_override: int | None = None,
+    use_bf16: bool = True,
+    use_compile: bool = True,
+):
     rank, world_size, local_rank, device, is_distributed = setup_distributed()
     master = rank == 0
     cfg = CONFIG
     torch.manual_seed(cfg.train.seed + rank)
+    torch.set_float32_matmul_precision("high")
 
     log_dir = Path(__file__).resolve().parent / "logs"
     log_dir.mkdir(exist_ok=True)
@@ -65,6 +72,7 @@ def main(synthetic: bool = False, total_steps_override: int | None = None):
                 f.write(line + "\n")
 
     log(f"world_size={world_size} rank={rank} device={device}")
+    log(f"use_bf16={use_bf16} use_compile={use_compile}")
     log(f"config: {cfg}")
 
     model = JEPA(cfg.model).to(device)
@@ -74,6 +82,17 @@ def main(synthetic: bool = False, total_steps_override: int | None = None):
     if is_distributed:
         model = DDP(model, device_ids=[local_rank])
     model_unwrapped = model.module if is_distributed else model
+
+    if use_compile:
+        log("torch.compile(model)...")
+        model = torch.compile(model, dynamic=False)
+        log("compile graph will warm up on first forward")
+
+    autocast_ctx = (
+        torch.autocast(device_type="cuda", dtype=torch.bfloat16)
+        if use_bf16 and device.type == "cuda"
+        else nullcontext()
+    )
 
     if synthetic:
         train_loader = make_synthetic_loader(cfg.train.seqs_per_step, cfg.train.seq_len, cfg.model.vocab_size, device, rank, seed_start=0)
@@ -99,8 +118,9 @@ def main(synthetic: bool = False, total_steps_override: int | None = None):
             g["lr"] = lr
 
         x = next(train_loader)
-        p, z = model(x)
-        loss, metrics = infonce_loss(p, z, tau=cfg.train.tau, subsample_cap=cfg.train.neg_subsample_cap)
+        with autocast_ctx:
+            p, z = model(x)
+            loss, metrics = infonce_loss(p, z, tau=cfg.train.tau, subsample_cap=cfg.train.neg_subsample_cap)
 
         opt.zero_grad()
         loss.backward()
@@ -116,13 +136,14 @@ def main(synthetic: bool = False, total_steps_override: int | None = None):
             )
 
         if step > 0 and step % cfg.train.val_every == 0:
-            val_metrics = evaluate_val(
-                model_unwrapped,
-                val_loader,
-                cfg.train.val_steps,
-                tau=cfg.train.tau,
-                subsample_cap=cfg.train.neg_subsample_cap,
-            )
+            with autocast_ctx:
+                val_metrics = evaluate_val(
+                    model_unwrapped,
+                    val_loader,
+                    cfg.train.val_steps,
+                    tau=cfg.train.tau,
+                    subsample_cap=cfg.train.neg_subsample_cap,
+                )
             for k, v in val_metrics.items():
                 log(f"  {k}={v:.4f}")
 
@@ -147,6 +168,13 @@ def main(synthetic: bool = False, total_steps_override: int | None = None):
 
 if __name__ == "__main__":
     synthetic = "--synthetic" in sys.argv
+    no_bf16 = "--no-bf16" in sys.argv
+    no_compile = "--no-compile" in sys.argv
     steps_arg = next((a for a in sys.argv if a.startswith("--steps=")), None)
     steps = int(steps_arg.split("=")[1]) if steps_arg else None
-    main(synthetic=synthetic, total_steps_override=steps)
+    main(
+        synthetic=synthetic,
+        total_steps_override=steps,
+        use_bf16=not no_bf16,
+        use_compile=not no_compile,
+    )
