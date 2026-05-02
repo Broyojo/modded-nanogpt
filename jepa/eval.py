@@ -18,30 +18,27 @@ def evaluate_val(
     subsample_cap: int = 8192,
 ) -> dict:
     model.eval()
-    losses, top1s, top5s, diag_sims = [], [], [], []
-    z_norms, z_stds, z_off_diags = [], [], []
+    accumulators = {
+        "val_loss": [], "val_top1": [], "val_top5": [], "val_diag_cos_sim": [],
+        "val_z_norm": [], "val_z_std_per_dim": [], "val_z_off_diag_cos_sim": [],
+        "val_z_same_pos_cross_batch_sim": [], "val_z_position_cheating_ratio": [],
+    }
     for _ in range(n_steps):
         x = next(val_loader)
         p, z = model(x)
         loss, m = infonce_loss(p, z, tau=tau, subsample_cap=subsample_cap)
         d = collapse_diagnostics(z)
-        losses.append(loss.detach())
-        top1s.append(m["top1"])
-        top5s.append(m["top5"])
-        diag_sims.append(m["diag_cos_sim"])
-        z_norms.append(d["z_norm"])
-        z_stds.append(d["z_std_per_dim"])
-        z_off_diags.append(d["z_off_diag_cos_sim"])
+        accumulators["val_loss"].append(loss.detach())
+        accumulators["val_top1"].append(m["top1"])
+        accumulators["val_top5"].append(m["top5"])
+        accumulators["val_diag_cos_sim"].append(m["diag_cos_sim"])
+        accumulators["val_z_norm"].append(d["z_norm"])
+        accumulators["val_z_std_per_dim"].append(d["z_std_per_dim"])
+        accumulators["val_z_off_diag_cos_sim"].append(d["z_off_diag_cos_sim"])
+        accumulators["val_z_same_pos_cross_batch_sim"].append(d["z_same_pos_cross_batch_sim"])
+        accumulators["val_z_position_cheating_ratio"].append(d["z_position_cheating_ratio"])
     model.train()
-    return {
-        "val_loss": torch.stack(losses).mean().item(),
-        "val_top1": torch.stack(top1s).mean().item(),
-        "val_top5": torch.stack(top5s).mean().item(),
-        "val_diag_cos_sim": torch.stack(diag_sims).mean().item(),
-        "val_z_norm": torch.stack(z_norms).mean().item(),
-        "val_z_std_per_dim": torch.stack(z_stds).mean().item(),
-        "val_z_off_diag_cos_sim": torch.stack(z_off_diags).mean().item(),
-    }
+    return {k: torch.stack(v).mean().item() for k, v in accumulators.items()}
 
 
 def linear_probe(

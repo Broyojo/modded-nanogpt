@@ -72,19 +72,50 @@ def infonce_loss(
     return loss, metrics
 
 
+@torch.no_grad()
 def collapse_diagnostics(z: Tensor) -> dict:
-    """Collapse detectors. z: (B, T, D)."""
-    z_flat = z.reshape(-1, z.size(-1))
-    with torch.no_grad():
-        z_norm = z_flat.norm(dim=-1).mean()
-        z_std_per_dim = z_flat.float().std(dim=0).mean()
-        z_n = F.normalize(z_flat, dim=-1)
-        sim_matrix = z_n @ z_n.T
-        n = sim_matrix.size(0)
-        off_diag_mask = ~torch.eye(n, dtype=torch.bool, device=z.device)
-        off_diag_mean = sim_matrix[off_diag_mask].mean()
+    """Collapse + position-cheating diagnostics on encoder latents. z: (B, T, D).
+
+    Computed via the sum-of-vectors trick to avoid materializing the full
+    (B*T) x (B*T) similarity matrix:
+      sum_{i,j} <z_i, z_j>  =  || sum_i z_i ||^2
+      sum_{i}   <z_i, z_i>  =  n   (when each z_i is L2-normalized)
+      off-diag mean         =  (||sum z||^2 - n) / (n*(n-1))
+
+    Returns:
+      z_norm                       — mean L2 norm of z (norm-collapse signal)
+      z_std_per_dim                — per-dim std averaged (variance-collapse signal)
+      z_off_diag_cos_sim           — mean cos sim over all (b,t) != (b',t') pairs
+      z_same_pos_cross_batch_sim   — mean cos sim of z_t[a] vs z_t[b] for a != b at the same position t
+      z_position_cheating_ratio    — same_pos - off_diag. Significantly > 0 means
+                                     latents at the same position across different
+                                     sequences cluster, i.e. position info is encoded
+                                     more strongly than content (= position cheating).
+    """
+    B, T, D = z.shape
+    z_f = z.float()
+    z_norm = z_f.norm(dim=-1).mean()
+    z_std_per_dim = z_f.reshape(-1, D).std(dim=0).mean()
+
+    z_n = F.normalize(z_f, dim=-1)
+
+    n = B * T
+    z_flat_sum = z_n.reshape(n, D).sum(dim=0)
+    sum_all = (z_flat_sum * z_flat_sum).sum()
+    off_diag_all = (sum_all - n) / max(1, n * (n - 1))
+
+    if B > 1:
+        z_sum_per_pos = z_n.sum(dim=0)
+        sum_per_pos = (z_sum_per_pos * z_sum_per_pos).sum(dim=-1)
+        off_diag_per_pos = (sum_per_pos - B) / (B * (B - 1))
+        same_pos_mean = off_diag_per_pos.mean()
+    else:
+        same_pos_mean = z_f.new_zeros(())
+
     return {
         "z_norm": z_norm,
         "z_std_per_dim": z_std_per_dim,
-        "z_off_diag_cos_sim": off_diag_mean,
+        "z_off_diag_cos_sim": off_diag_all,
+        "z_same_pos_cross_batch_sim": same_pos_mean,
+        "z_position_cheating_ratio": same_pos_mean - off_diag_all,
     }
