@@ -1,3 +1,4 @@
+import dataclasses
 import math
 import os
 import sys
@@ -49,8 +50,11 @@ def make_synthetic_loader(seqs_per_step: int, seq_len: int, vocab_size: int, dev
 def main(
     synthetic: bool = False,
     total_steps_override: int | None = None,
+    warmup_steps_override: int | None = None,
     use_bf16: bool = True,
     use_compile: bool = True,
+    use_wandb: bool = True,
+    wandb_run_name: str | None = None,
 ):
     rank, world_size, local_rank, device, is_distributed = setup_distributed()
     master = rank == 0
@@ -60,7 +64,8 @@ def main(
 
     log_dir = Path(__file__).resolve().parent / "logs"
     log_dir.mkdir(exist_ok=True)
-    log_file = log_dir / f"run_{int(time.time())}.log" if master else None
+    run_id = int(time.time())
+    log_file = log_dir / f"run_{run_id}.log" if master else None
 
     state = {"step": 0}
 
@@ -71,8 +76,31 @@ def main(
             with log_file.open("a") as f:
                 f.write(line + "\n")
 
+    total_steps = total_steps_override if total_steps_override is not None else cfg.train.total_steps
+    warmup_steps = warmup_steps_override if warmup_steps_override is not None else cfg.train.warmup_steps
+
+    wandb_run = None
+    if use_wandb and master:
+        import wandb
+        wandb_config = {
+            "model": dataclasses.asdict(cfg.model),
+            "train": dataclasses.asdict(cfg.train),
+            "total_steps": total_steps,
+            "warmup_steps": warmup_steps,
+            "use_bf16": use_bf16,
+            "use_compile": use_compile,
+            "synthetic": synthetic,
+            "world_size": world_size,
+        }
+        wandb_run = wandb.init(
+            project="jepa-modded-nanogpt",
+            name=wandb_run_name or f"run_{run_id}",
+            config=wandb_config,
+        )
+
     log(f"world_size={world_size} rank={rank} device={device}")
-    log(f"use_bf16={use_bf16} use_compile={use_compile}")
+    log(f"use_bf16={use_bf16} use_compile={use_compile} use_wandb={use_wandb}")
+    log(f"total_steps={total_steps} warmup_steps={warmup_steps}")
     log(f"config: {cfg}")
 
     model = JEPA(cfg.model).to(device)
@@ -108,12 +136,11 @@ def main(
         weight_decay=cfg.train.weight_decay,
     )
 
-    total_steps = total_steps_override if total_steps_override is not None else cfg.train.total_steps
     t0 = time.time()
     for step in range(total_steps):
         state["step"] = step
 
-        lr = lr_for_step(step, cfg.train.warmup_steps, total_steps, cfg.train.lr)
+        lr = lr_for_step(step, warmup_steps, total_steps, cfg.train.lr)
         for g in opt.param_groups:
             g["lr"] = lr
 
@@ -134,6 +161,19 @@ def main(
                 f"top5={metrics['top5'].item():.3f} diag_sim={metrics['diag_cos_sim'].item():.3f} "
                 f"lr={lr:.2e} grad={grad_norm.item():.2f} sps={sps:.1f}"
             )
+            if wandb_run is not None:
+                wandb_run.log(
+                    {
+                        "train/loss": loss.item(),
+                        "train/top1": metrics["top1"].item(),
+                        "train/top5": metrics["top5"].item(),
+                        "train/diag_cos_sim": metrics["diag_cos_sim"].item(),
+                        "train/lr": lr,
+                        "train/grad_norm": grad_norm.item(),
+                        "train/steps_per_sec": sps,
+                    },
+                    step=step,
+                )
 
         if step > 0 and step % cfg.train.val_every == 0:
             with autocast_ctx:
@@ -146,6 +186,8 @@ def main(
                 )
             for k, v in val_metrics.items():
                 log(f"  {k}={v:.4f}")
+            if wandb_run is not None:
+                wandb_run.log({f"val/{k.removeprefix('val_')}": v for k, v in val_metrics.items()}, step=step)
 
     if master:
         ckpt_dir = Path(__file__).resolve().parent / "checkpoints"
@@ -162,6 +204,8 @@ def main(
         )
         log(f"saved checkpoint to {ckpt_path}")
 
+    if wandb_run is not None:
+        wandb_run.finish()
     if is_distributed:
         dist.destroy_process_group()
 
@@ -170,11 +214,19 @@ if __name__ == "__main__":
     synthetic = "--synthetic" in sys.argv
     no_bf16 = "--no-bf16" in sys.argv
     no_compile = "--no-compile" in sys.argv
+    no_wandb = "--no-wandb" in sys.argv
     steps_arg = next((a for a in sys.argv if a.startswith("--steps=")), None)
+    warmup_arg = next((a for a in sys.argv if a.startswith("--warmup=")), None)
+    name_arg = next((a for a in sys.argv if a.startswith("--name=")), None)
     steps = int(steps_arg.split("=")[1]) if steps_arg else None
+    warmup = int(warmup_arg.split("=")[1]) if warmup_arg else None
+    name = name_arg.split("=")[1] if name_arg else None
     main(
         synthetic=synthetic,
         total_steps_override=steps,
+        warmup_steps_override=warmup,
         use_bf16=not no_bf16,
         use_compile=not no_compile,
+        use_wandb=not no_wandb,
+        wandb_run_name=name,
     )
