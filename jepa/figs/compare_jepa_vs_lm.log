@@ -1,0 +1,37 @@
+loading JEPA: jepa/checkpoints/large_step50000.pt
+  kind=jepa split_index=6 model_dim=768
+loading LM:   jepa/checkpoints/lm_large_step50000.pt
+  kind=lm split_index=6 model_dim=768
+
+=== SST-2 sentiment linear probe ===
+  SST-2 train=67349 val=872
+  encoding with JEPA encoder...
+    JEPA train=torch.Size([67349, 768]) val=torch.Size([872, 768])
+  encoding with LM mid-layer...
+    LM   train=torch.Size([67349, 768]) val=torch.Size([872, 768])
+  training linear classifiers...
+  SST-2 best val acc — JEPA: 0.5206 | LM mid: 0.7901
+
+=== Position-cheating ratio on layer-6 features ===
+  metric                              JEPA       LM
+  z_norm                                27.7128    27.7128
+  z_std_per_dim                          0.8306     0.6961
+  z_off_diag_cos_sim                     0.3033     0.4985
+  z_same_pos_cross_batch_sim             0.4449     0.5015
+  z_position_cheating_ratio              0.1416     0.0029
+
+=== Next-token CE linear probe on layer-6 features ===
+  probing JEPA features...
+    JEPA probe_val_loss=7.8030 perplexity=2447.86
+  probing LM mid-layer features...
+    LM   probe_val_loss=6.0787 perplexity=436.47
+
+=== Summary table ===
+
+  metric                                     JEPA      LM mid      winner
+  ----------------------------------------------------------------------
+  SST-2 best val acc                       0.5206      0.7901          LM
+  Next-token probe val PPL              2447.8588    436.4744          LM
+  Position-cheating ratio                  0.1416      0.0029          LM
+  z_off_diag_cos_sim                       0.3033      0.4985        JEPA
+  z_std_per_dim                            0.8306      0.6961        JEPA
