@@ -6,3 +6,4 @@ logs/
 .venv/
 checkpoints/
 wandb/
+.hf_cache/
